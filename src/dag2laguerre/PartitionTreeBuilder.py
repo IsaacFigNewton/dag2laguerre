@@ -23,7 +23,6 @@ import networkx as nx
 
 PartitionTree = Dict[FrozenSet[Any], "PartitionTree"]
 
-@dataclass(frozen=True)
 class PartitionTreeBuilder:
     """
     Builds a partition tree from descendant sets derived from a directed graph.
@@ -45,31 +44,19 @@ class PartitionTreeBuilder:
       a recursion loop may occur.
     """
 
-    graph: nx.DiGraph
+    def __init__(self, graph: nx.DiGraph):
+        self.graph = graph
+        
+        self.descendant_hye_node_map = dict()
+        for root in self.graph.nodes():
+            descendant_hyes, root_hye = self.get_descendant_hyes(root)
+            self.descendant_hye_node_map.update(descendant_hyes)
+        
+        # get a nested dictionary representing the partition tree.
+        self.partition_tree: PartitionTree =  self.get_partition_tree(set(self.descendant_hye_node_map.keys()))
+        
 
-    def build(self) -> PartitionTree:
-        """
-        Convenience method: compute descendant sets from `root` and build the
-        corresponding partition tree.
-
-        Args:
-            root: The root node to start from.
-
-        Returns:
-            A nested dictionary representing the partition tree.
-        """
-        roots = [
-            n for n in self.graph.nodes()
-            if self.graph.predecessors(n)
-        ]
-        root_sets = [self.to_sets(root)[0] for root in roots]
-        sets = set().union(*root_sets)
-        # remove the root set
-        # sets = sets - {frozenset(self.graph.nodes())}
-        # print(sets)
-        return self.get_partition_tree(sets)
-
-    def to_sets(self, root: Any) -> Tuple[Set[FrozenSet[Any]], Set[Any]]:
+    def get_descendant_hyes(self, root: Any) -> Tuple[Dict[FrozenSet[Any], Any], Set[Any]]:
         """
         Convert the reachable subgraph under `root` into a collection of frozensets.
 
@@ -85,13 +72,13 @@ class PartitionTreeBuilder:
 
         Returns:
             (child_sets, all_descendants)
-            - child_sets: set of frozensets, each representing a descendant set
+            - child_sets: dict of frozenset-parent node pairs, each representing a descendant set
             - all_descendants: the (mutable) set of descendants of `root` including itself
         """
         children = list(self.graph.successors(root))
 
         # Collect all descendant-sets contributed by children.
-        child_sets: Set[FrozenSet[Any]] = set()
+        child_sets: Dict[FrozenSet[Any], Any] = dict()
 
         # This node is always part of its own descendant set.
         all_descendants: Set[Any] = {root}
@@ -100,14 +87,14 @@ class PartitionTreeBuilder:
             # Recursively compute:
             # - all sets found under the child
             # - the child's full descendant set
-            new_child_sets, descendants = self.to_sets(child)
+            new_child_sets, descendants = self.get_descendant_hyes(child)
 
             # Merge results into our running aggregates.
             child_sets.update(new_child_sets)
             all_descendants.update(descendants)
 
         # Add the descendant set for this root itself.
-        child_sets.add(frozenset(all_descendants))
+        child_sets[frozenset(all_descendants)] = root
 
         return child_sets, all_descendants
 

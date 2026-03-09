@@ -46,6 +46,7 @@ class RecursivePowerDiagram:
         seed: int = 42,
         root=((0, 0), (1, 0), (1, 1), (0, 1)),
         cmap: str = "hsv",
+        label_map: Dict = dict(),
         config: Dict[str, Any] = DEFAULT_CONFIG,
     ):
         self.h = hierarchy
@@ -65,6 +66,7 @@ class RecursivePowerDiagram:
 
         # Hierarchy-consistent coloring
         self.cmap = plt.get_cmap(cmap)
+        self.label_map = label_map
         self.cell_colors = self._partition_cmap(self.h, 0, 1)
 
     def _partition_cmap(
@@ -94,10 +96,10 @@ class RecursivePowerDiagram:
                 results.update(self._partition_cmap(v, child_start, child_end))
         return results
 
-    @staticmethod
-    def _label(key) -> str:
+    def _label(self, key, set_labels:bool) -> str:
         """Pretty label for a node key (assumes iterable of sortable items)."""
-        return "{" + ",".join(map(str, sorted(key))) + "}"
+        fallback = "{" + ",".join(map(str, sorted(key))) + "}" if set_labels else ""
+        return self.label_map.get(key, fallback)
 
     def _solve_node(
         self,
@@ -133,7 +135,15 @@ class RecursivePowerDiagram:
         )
         return sites, weights, cells
 
-    def _draw(self, ax, node_label, node: dict, region: np.ndarray, labels: bool, depth: int = 0) -> None:
+    def _draw(self,
+              ax,
+              node_label,
+              node: dict,
+              region: np.ndarray,
+              labels: bool,
+              set_labels: bool,
+              depth: int = 0
+        ) -> None:
         """
         Recursively draw the hierarchy within `region`.
 
@@ -175,7 +185,7 @@ class RecursivePowerDiagram:
                 ax.text(
                     site[0],
                     site[1],
-                    self._label(key),
+                    self._label(key, set_labels),
                     fontsize=self.config["label_fontsize"],
                     ha="center",
                     va="center",
@@ -184,9 +194,9 @@ class RecursivePowerDiagram:
             # Recurse into child subtree if present
             child = node.get(key)
             if isinstance(child, dict) and child:
-                self._draw(ax, key, child, cell, labels, depth + 1)
+                self._draw(ax, key, child, cell, labels, set_labels, depth + 1)
 
-    def show(self, figsize=None, labels: bool = True) -> None:
+    def show(self, figsize=None, labels: bool = True, set_labels: bool = True) -> None:
         """Render the full hierarchy starting from the root region."""
         figsize = self.config["figsize"] if figsize is None else figsize
 
@@ -202,7 +212,7 @@ class RecursivePowerDiagram:
         except TypeError:
             root_label = "root"
 
-        self._draw(ax, root_label, self.h, self.root, labels, depth=0)
+        self._draw(ax, root_label, self.h, self.root, labels, set_labels, depth=0)
 
         # Outline root region
         r = self.poly.ccw(self.root)
