@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable
+from typing import Iterable, Dict, FrozenSet, Any
 
 import numpy as np
 import matplotlib.pyplot as plt
-from .coloring import *
 from .geometry import *
 from .geometry.power_diagram import *
 
@@ -44,7 +43,7 @@ class RecursivePowerDiagram:
         seed: int = 42,
         root=((0, 0), (1, 0), (1, 1), (0, 1)),
         *,
-        color_angles: tuple[float, float, float] = (0.9, 0.6, 0.2),
+        cmap: str = "hsv",
     ):
         self.h = hierarchy
         self.rng = np.random.default_rng(seed)
@@ -59,7 +58,35 @@ class RecursivePowerDiagram:
         self.lloyd = LloydRelaxer(self.poly, self.diagram, self.fitter)
 
         # Hierarchy-consistent coloring
-        self.colorer = HierarchicalFieldColorer(self.poly, angles=color_angles)
+        self.cmap = plt.get_cmap(cmap)
+        self.cell_colors = self._partition_cmap(self.h, 0, 1)
+
+    def _partition_cmap(self,
+            subtree: Dict[FrozenSet, Any],
+            start,
+            end
+        ) -> Dict[FrozenSet, np.ndarray]:
+        keys = list(subtree.keys())
+        n = len(keys)
+
+        if n == 0:
+            return {}
+
+        width = (end - start) / n
+        results = {}
+        for i, k in enumerate(keys):
+            child_start = start + i * width
+            child_end = child_start + width
+            mid = (child_start + child_end) / 2
+
+            color = self.cmap(mid)[:3]
+            results[k] = color
+
+            v = subtree[k]
+
+            if isinstance(v, dict):
+                results.update(self._partition_cmap(v, child_start, child_end))
+        return results
 
     @staticmethod
     def _label(key) -> str:
@@ -117,14 +144,17 @@ class RecursivePowerDiagram:
 
         sites, _weights, cells = self._solve_node(node_label, keys, region)
 
-        # Hierarchy-aware colors: siblings share a palette based on THIS parent region.
-        rgbs = self.colorer.colors_for_cells(cells, region)
-
-        for (key, site, cell, rgb) in zip(keys, sites, cells, rgbs):
+        for (key, site, cell) in zip(keys, sites, cells):
             if len(cell) < 3:
                 continue
-
-            ax.fill(cell[:, 0], cell[:, 1], color=rgb, alpha=0.35, linewidth=1.2)
+            
+            ax.fill(
+                cell[:, 0],
+                cell[:, 1],
+                color=self.cell_colors[key],
+                alpha=0.35,
+                linewidth=1.2
+            )
             ax.plot(
                 np.r_[cell[:, 0], cell[0, 0]],
                 np.r_[cell[:, 1], cell[0, 1]],
