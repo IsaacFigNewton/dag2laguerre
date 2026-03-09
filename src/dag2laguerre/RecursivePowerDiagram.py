@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable, Dict, FrozenSet, Any
+from typing import Iterable, Dict, FrozenSet, Any, Optional
 
 import numpy as np
 import matplotlib.pyplot as plt
 from .geometry import *
 from .geometry.power_diagram import *
+from .config import DEFAULT_CONFIG
 
 class RecursivePowerDiagram:
     """
@@ -23,8 +24,10 @@ class RecursivePowerDiagram:
         RNG seed for reproducibility.
     root:
         Root convex polygon region (default: unit square).
-    color_angles:
-        Euler angles for the centroid field coloring.
+    cmap:
+        Matplotlib colormap name.
+    config:
+        Dict of renderer/solver parameters. See DEFAULT_CONFIG.
 
     Example hierarchy
     -----------------
@@ -42,12 +45,15 @@ class RecursivePowerDiagram:
         hierarchy: dict,
         seed: int = 42,
         root=((0, 0), (1, 0), (1, 1), (0, 1)),
-        *,
         cmap: str = "hsv",
+        config: Dict[str, Any] = DEFAULT_CONFIG,
     ):
         self.h = hierarchy
         self.rng = np.random.default_rng(seed)
         self.root = np.asarray(root, dtype=float)
+
+        # Merge defaults with user overrides (user keys win)
+        self.config: Dict[str, Any] = config
 
         # Geometry + solver pipeline
         self.poly = PolygonOps(self.rng)
@@ -61,11 +67,12 @@ class RecursivePowerDiagram:
         self.cmap = plt.get_cmap(cmap)
         self.cell_colors = self._partition_cmap(self.h, 0, 1)
 
-    def _partition_cmap(self,
-            subtree: Dict[FrozenSet, Any],
-            start,
-            end
-        ) -> Dict[FrozenSet, np.ndarray]:
+    def _partition_cmap(
+        self,
+        subtree: Dict[FrozenSet, Any],
+        start,
+        end,
+    ) -> Dict[FrozenSet, np.ndarray]:
         keys = list(subtree.keys())
         n = len(keys)
 
@@ -83,7 +90,6 @@ class RecursivePowerDiagram:
             results[k] = color
 
             v = subtree[k]
-
             if isinstance(v, dict):
                 results.update(self._partition_cmap(v, child_start, child_end))
         return results
@@ -98,11 +104,6 @@ class RecursivePowerDiagram:
         node_label,
         keys: list,
         region: np.ndarray,
-        *,
-        lloyd_iters: int = 8,
-        site_step: float = 0.7,
-        fit_iters: int = 60,
-        fit_tol_rel: float = 2e-2,
     ) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
         """
         Solve a single hierarchy node.
@@ -113,18 +114,22 @@ class RecursivePowerDiagram:
         2) Compute target areas from CapacityTargets.
         3) Run LloydRelaxer to obtain stable sites + fitted weights + final cells.
         """
+
         K = len(keys)
+        # 1) Sample initial sites inside the region
         sites0 = np.array([self.poly.sample_in(region) for _ in range(K)], dtype=float)
+        # 2) Compute target areas from CapacityTargets
         target_areas = self.targets.target_areas(node_label, keys, region)
 
+        # 3) Run LloydRelaxer to obtain stable sites + fitted weights + final cells
         sites, weights, cells = self.lloyd.relax(
             sites0,
             target_areas,
             region,
-            lloyd_iters=lloyd_iters,
-            site_step=site_step,
-            fit_iters=fit_iters,
-            fit_tol_rel=fit_tol_rel,
+            lloyd_iters=self.config["lloyd_iters"],
+            site_step=self.config["site_step"],
+            fit_iters=self.config["fit_iters"],
+            fit_tol_rel=self.config["fit_tol_rel"],
         )
         return sites, weights, cells
 
@@ -147,33 +152,48 @@ class RecursivePowerDiagram:
         for (key, site, cell) in zip(keys, sites, cells):
             if len(cell) < 3:
                 continue
-            
+
+            # Fill cell with hierarchy-consistent color
             ax.fill(
                 cell[:, 0],
                 cell[:, 1],
                 color=self.cell_colors[key],
-                alpha=0.35,
-                linewidth=1.2
+                alpha=self.config["cell_alpha"],
+                linewidth=self.config["cell_fill_linewidth"],
             )
+
+            # Draw cell boundary
             ax.plot(
                 np.r_[cell[:, 0], cell[0, 0]],
                 np.r_[cell[:, 1], cell[0, 1]],
-                linewidth=1.2,
-                color=(0, 0, 0, 0.35),
+                linewidth=self.config["cell_edge_linewidth"],
+                color=self.config["cell_edge_color"],
             )
-            if labels:
-                ax.text(site[0], site[1], self._label(key), fontsize=9, ha="center", va="center")
 
+            # Optional label at the site
+            if labels:
+                ax.text(
+                    site[0],
+                    site[1],
+                    self._label(key),
+                    fontsize=self.config["label_fontsize"],
+                    ha="center",
+                    va="center",
+                )
+
+            # Recurse into child subtree if present
             child = node.get(key)
             if isinstance(child, dict) and child:
                 self._draw(ax, key, child, cell, labels, depth + 1)
 
-    def show(self, figsize=(7, 7), labels:bool=True) -> None:
+    def show(self, figsize=None, labels: bool = True) -> None:
         """Render the full hierarchy starting from the root region."""
+        figsize = self.config["figsize"] if figsize is None else figsize
+
         fig, ax = plt.subplots(figsize=figsize)
         ax.set_aspect("equal", adjustable="box")
-        ax.set_xlim(-0.02, 1.02)
-        ax.set_ylim(-0.02, 1.02)
+        ax.set_xlim(*self.config["xlim"])
+        ax.set_ylim(*self.config["ylim"])
         ax.axis("off")
 
         # Root label: union of top-level keys (works if keys are sets/frozensets)
@@ -186,7 +206,11 @@ class RecursivePowerDiagram:
 
         # Outline root region
         r = self.poly.ccw(self.root)
-        ax.plot(np.r_[r[:, 0], r[0, 0]], np.r_[r[:, 1], r[0, 1]], linewidth=2.0)
+        ax.plot(
+            np.r_[r[:, 0], r[0, 0]],
+            np.r_[r[:, 1], r[0, 1]],
+            linewidth=self.config["root_outline_linewidth"],
+        )
 
         plt.tight_layout()
         plt.show()

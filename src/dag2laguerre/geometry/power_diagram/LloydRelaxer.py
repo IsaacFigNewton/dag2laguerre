@@ -30,7 +30,6 @@ class LloydRelaxer:
         sites: np.ndarray,
         target_areas: np.ndarray,
         region: np.ndarray,
-        *,
         lloyd_iters: int = 8,
         site_step: float = 0.7,
         fit_iters: int = 60,
