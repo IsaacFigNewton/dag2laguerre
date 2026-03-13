@@ -49,8 +49,9 @@ class PartitionTreeBuilder:
         
         self.descendant_hye_node_map = dict()
         for root in self.graph.nodes():
-            descendant_hyes, root_hye = self.get_descendant_hyes(root)
-            self.descendant_hye_node_map.update(descendant_hyes)
+            if self.graph.in_degree(root) == 0:
+                descendant_hyes, root_hye = self.get_descendant_hyes(root)
+                self.descendant_hye_node_map.update(descendant_hyes)
         
         # get a nested dictionary representing the partition tree.
         self.partition_tree: PartitionTree =  self.get_partition_tree(set(self.descendant_hye_node_map.keys()))
